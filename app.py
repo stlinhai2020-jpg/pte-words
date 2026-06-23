@@ -9,6 +9,7 @@ from openai import OpenAI
 st.set_page_config(page_title="PTE极简生词本", layout="centered", initial_sidebar_state="collapsed")
 
 # --- 1. 配置阿里通义千问视觉大模型 ---
+# 提示：请去阿里云百炼平台申请 DASHSCOPE_API_KEY 并填入 Streamlit 的 Secrets 中
 API_KEY = st.secrets.get("DASHSCOPE_API_KEY", "sk-ws-H.RPXDEER.ZfBh.MEUCIBgga-s1bmH7zVO5l1wX6DjUMgcSsCnfJAohmy0mpxT8AiEAtdVHUInYzuBaDW99BtGX0bnhnEKampjR1VgY4YS3Ofg") 
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL_NAME = "qwen-vl-max"  # 阿里顶级视觉多模态大模型
@@ -76,7 +77,7 @@ def call_ai_to_extract_from_image(base64_image):
         st.error(f"AI 图像识别出错啦: {e}")
         return None
 
-# --- 2. 本地数据存储 ---
+# --- 2. 本地数据存储与 TTS 发音核心（JavaScript 注入） ---
 DB_FILE = "words_db.json"
 if "words" not in st.session_state:
     if os.path.exists(DB_FILE):
@@ -92,91 +93,34 @@ def save_to_local():
 
 # --- 3. 页面交互 UI 逻辑 ---
 st.title("⚡ PTE 智能生词本")
-st.caption("粘贴截图直接识别 | 有道真人美音发音 | 列表前端极速连播")
+st.caption("拖拽截图高效导入 | 有道真人美音发音 | 列表前端高保真连播")
 
 # 截图导入区
 st.markdown("### 📸 猩际截图智能导入")
 
-# HTML/JS 混合的高级粘贴板捕获器
-# 解决点击空白粘贴无效的问题：在 Streamlit 页面提供一个高度聚焦的可视化“粘贴板感应箱”
-paste_html_code = """
-<div id="paste-box" style="
-    border: 2px dashed #ff4b4b;
-    border-radius: 10px;
-    padding: 25px;
-    text-align: center;
-    background-color: #fff8f8;
-    cursor: pointer;
-    transition: all 0.3s;
-" onclick="focusBox()">
-    <span style="font-size: 24px;">📋</span>
-    <p style="margin: 8px 0 0 0; font-weight: bold; color: #31333F; font-size: 15px;">
-        先用鼠标点我一下，然后按 Ctrl + V 粘贴截图
-    </p>
-    <p style="margin: 4px 0 0 0; color: #7f8c8d; font-size: 12px;">
-        (点击后框框会变亮，此时直接粘贴即可成功捕获)
-    </p>
-    <div id="preview-area" style="margin-top: 10px; display: none;">
-        <p style="color: #2ecc71; font-weight: bold; font-size: 13px;">✅ 截图已成功捕获！请在下方点击“开始无脑提取”</p>
-    </div>
-</div>
+# 引导卡片：说明电脑端和手机端的最佳传输姿势
+st.info("""
+💡 **如何高效导入截图**：
+- **电脑端**：使用任何截图工具截图后，**直接把截图拖进**下方的文件接收框中，免去保存到本地的繁琐！
+- **手机端**：点击下方上传框，选择相册中最新的 APEUni 截图即可。
+""")
 
-<script>
-function focusBox() {
-    const box = document.getElementById('paste-box');
-    box.style.backgroundColor = '#ffe9e9';
-    box.style.borderColor = '#ff2b2b';
-    box.style.boxShadow = '0 0 10px rgba(255,75,75,0.2)';
-}
+uploaded_file = st.file_uploader(
+    "👉 请在此处拖入你的猩际截图（或点击选择文件）", 
+    type=["png", "jpg", "jpeg"]
+)
 
-document.addEventListener('paste', function (e) {
-    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
-    for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-            const blob = items[i].getAsFile();
-            const reader = new FileReader();
-            reader.onload = function (event) {
-                const base64Data = event.target.result.split(',')[1];
-                
-                // 显示成功预览提示
-                document.getElementById('preview-area').style.display = 'block';
-                
-                // 将数据安全送回 Streamlit 后台
-                const message = {
-                    isStreamlitMessage: true,
-                    type: "streamlit:setComponentValue",
-                    value: base64Data
-                };
-                window.parent.postMessage(message, "*");
-            };
-            reader.readAsDataURL(blob);
-        }
-    }
-});
-</script>
-"""
-
-# 渲染高度定制的“粘贴感应箱”，并获取回传的 Base64 图片数据
-captured_base64 = st.components.v1.html(paste_html_code, height=160)
-
-# 如果用户没有成功用 Ctrl+V，我们依然保留底层传统文件拖拽上传作为兜底防呆
-with st.expander("📎 手机端或无法粘贴？点击这里使用传统上传文件"):
-    fallback_file = st.file_uploader("选择你的猩际截图：", type=["png", "jpg", "jpeg"], key="fallback_upload")
-
-# 确定使用哪种方式获取到的图片
-final_base64 = None
-if captured_base64:
-    final_base64 = captured_base64
-elif fallback_file is not None:
-    final_base64 = encode_image(fallback_file.read())
-
-if final_base64:
+if uploaded_file is not None:
+    img_bytes = uploaded_file.read()
+    st.image(img_bytes, caption='已捕获的 PTE 截图', use_container_width=True)
+    
     if st.button("🚀 开始无脑提取生词", type="primary", use_container_width=True):
         if not API_KEY:
             st.error("请先在 Streamlit 后台配置您的 DASHSCOPE_API_KEY！")
         else:
             with st.spinner("有道视觉大模型正在解析图片，提炼生词和标准牛津释义..."):
-                ai_result = call_ai_to_extract_from_image(final_base64)
+                base64_img = encode_image(img_bytes)
+                ai_result = call_ai_to_extract_from_image(base64_img)
                 if ai_result:
                     new_count = 0
                     for w, info in ai_result.items():
@@ -195,7 +139,7 @@ tab1, tab2 = st.tabs(["📚 生词本 (高清美音)", "🎲 随机复习模式"
 
 with tab1:
     if not st.session_state.words:
-        st.info("词本空空如也，快去上面粘贴截图吧！")
+        st.info("词本空空如也，快去上面上传截图吧！")
     else:
         sorted_words = sorted(st.session_state.words.keys())
         
@@ -237,7 +181,11 @@ with tab1:
         var delay = {loop_interval * 1000};
         var infinite = {infinite_js};
         var isPlaying = false;
-        var currentAudio = null;
+        
+        // 关键修复：定义一个全局唯一的 Audio 实例，避开移动端每一次 new Audio 被拦截的安全策略
+        if (!window.globalAudioElement) {{
+            window.globalAudioElement = new Audio();
+        }}
 
         function updateStatus(text) {{
             document.getElementById('player-status').innerText = text;
@@ -252,13 +200,21 @@ with tab1:
             index = 0;
             currentRepeat = 0;
             document.getElementById('btn-play').style.opacity = '0.6';
-            playWord();
+            
+            // 手机浏览器核心解锁：利用点击这一用户手势，首次静默播音，彻底解锁播放权限
+            window.globalAudioElement.src = "[https://dict.youdao.com/dictvoice?type=2&audio=hello](https://dict.youdao.com/dictvoice?type=2&audio=hello)";
+            window.globalAudioElement.play().then(function() {{
+                playWord();
+            }}).catch(function(e) {{
+                console.log("音频解锁失败，直接尝试连播", e);
+                playWord();
+            }});
         }}
 
         function stopLoop() {{
             isPlaying = false;
-            if (currentAudio) {{
-                currentAudio.pause();
+            if (window.globalAudioElement) {{
+                window.globalAudioElement.pause();
             }}
             document.getElementById('btn-play').style.opacity = '1';
             updateStatus("已手动停止播音");
@@ -274,11 +230,10 @@ with tab1:
                 // 采用网易有道高清真人美音接口（type=2为美音，发音饱满自然）
                 var url = "[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)" + encodeURIComponent(word);
                 
-                if (currentAudio) currentAudio.pause();
-                currentAudio = new Audio(url);
-                currentAudio.playbackRate = {loop_rate};
+                window.globalAudioElement.src = url;
+                window.globalAudioElement.playbackRate = {loop_rate};
                 
-                currentAudio.onended = function() {{
+                window.globalAudioElement.onended = function() {{
                     currentRepeat++;
                     if (currentRepeat < repeatLimit) {{
                         setTimeout(playWord, delay);
@@ -289,15 +244,14 @@ with tab1:
                     }}
                 }};
                 
-                currentAudio.onerror = function() {{
-                    // 若网络抖动出错，自动跳过防止卡死
+                window.globalAudioElement.onerror = function() {{
+                    // 若网络抖动或解析出错，自动跳过防止卡死
                     index++;
                     currentRepeat = 0;
                     setTimeout(playWord, 100);
                 }};
                 
-                // 直接由用户点击触发，突破手机 Safari/Chrome 的 autoplay 限制
-                currentAudio.play().catch(function(e) {{
+                window.globalAudioElement.play().catch(function(e) {{
                     console.error("发音失败", e);
                     index++;
                     currentRepeat = 0;
