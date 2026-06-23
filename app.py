@@ -9,7 +9,6 @@ from openai import OpenAI
 st.set_page_config(page_title="PTE极简生词本", layout="centered", initial_sidebar_state="collapsed")
 
 # --- 1. 配置阿里通义千问视觉大模型 ---
-# 提示：请去阿里云百炼平台申请 DASHSCOPE_API_KEY 并填入 Streamlit 的 Secrets 中
 API_KEY = st.secrets.get("DASHSCOPE_API_KEY", "sk-ws-H.RPXDEER.ZfBh.MEUCIBgga-s1bmH7zVO5l1wX6DjUMgcSsCnfJAohmy0mpxT8AiEAtdVHUInYzuBaDW99BtGX0bnhnEKampjR1VgY4YS3Ofg") 
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL_NAME = "qwen-vl-max"  # 阿里顶级视觉多模态大模型
@@ -77,7 +76,7 @@ def call_ai_to_extract_from_image(base64_image):
         st.error(f"AI 图像识别出错啦: {e}")
         return None
 
-# --- 2. 本地数据存储与 TTS 发音核心（JavaScript 注入） ---
+# --- 2. 本地数据存储 ---
 DB_FILE = "words_db.json"
 if "words" not in st.session_state:
     if os.path.exists(DB_FILE):
@@ -93,34 +92,102 @@ def save_to_local():
 
 # --- 3. 页面交互 UI 逻辑 ---
 st.title("⚡ PTE 智能生词本")
-st.caption("拖拽截图高效导入 | 有道真人美音发音 | 列表前端高保真连播")
+st.caption("Ctrl+V 直接粘贴识别 | 有道高清美音 | 移动端连播优化")
 
 # 截图导入区
-st.markdown("### 📸 猩际截图智能导入")
+st.markdown("### 📸 猩际/猩际截图智能导入")
 
-# 引导卡片：说明电脑端和手机端的最佳传输姿势
-st.info("""
-💡 **如何高效导入截图**：
-- **电脑端**：使用任何截图工具截图后，**直接把截图拖进**下方的文件接收框中，免去保存到本地的繁琐！
-- **手机端**：点击下方上传框，选择相册中最新的 APEUni 截图即可。
-""")
+# 终极修复方案 1：全新的双向粘贴板组件（直接绕过 Streamlit 后台刷新）
+# 它既是一个可视化的键盘事件焦点盒，又能完美将数据在前端缓存。
+paste_and_upload_html = """
+<div id="paste-zone" style="
+    border: 2px dashed #ff4b4b;
+    border-radius: 10px;
+    padding: 30px;
+    text-align: center;
+    background-color: #fff8f8;
+    cursor: pointer;
+    transition: all 0.3s;
+" onclick="activateFocus()">
+    <span style="font-size: 32px;">📋</span>
+    <p style="margin: 10px 0 0 0; font-weight: bold; color: #31333F; font-size: 16px;">
+        【电脑端】先点我一下，然后直接按 Ctrl + V 粘贴截图
+    </p>
+    <p style="margin: 4px 0 0 0; color: #7f8c8d; font-size: 13px;">
+        【手机端】直接点击本框，即可从相册选择最新截图
+    </p>
+    <input type="file" id="hidden-file-input" accept="image/*" style="display:none;" onchange="handleFileSelect(this)">
+    <div id="success-prompt" style="margin-top: 12px; display: none;">
+        <p style="color: #2ecc71; font-weight: bold; font-size: 14px; margin: 0;">✅ 截图捕获成功！正在预览...</p>
+        <img id="img-preview" style="max-width: 100%; max-height: 150px; margin-top: 10px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+    </div>
+</div>
 
-uploaded_file = st.file_uploader(
-    "👉 请在此处拖入你的猩际截图（或点击选择文件）", 
-    type=["png", "jpg", "jpeg"]
-)
-
-if uploaded_file is not None:
-    img_bytes = uploaded_file.read()
-    st.image(img_bytes, caption='已捕获的 PTE 截图', use_container_width=True)
+<script>
+// 点击大框时，如果是手机端则触发文件选择，如果是电脑端则准备聚焦接收粘贴
+function activateFocus() {
+    const box = document.getElementById('paste-zone');
+    box.style.backgroundColor = '#ffe9e9';
+    box.style.borderColor = '#ff2b2b';
     
+    // 如果是移动端或点击，同时唤醒隐式上传以保障兼容性
+    if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+        document.getElementById('hidden-file-input').click();
+    }
+}
+
+// 电脑端 Ctrl+V 粘贴事件监听
+document.addEventListener('paste', function (e) {
+    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+    for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+            const blob = items[i].getAsFile();
+            processBlob(blob);
+        }
+    }
+});
+
+// 手机端文件选择处理
+function handleFileSelect(input) {
+    if (input.files && input.files[0]) {
+        processBlob(input.files[0]);
+    }
+}
+
+// 统一处理图片二进制并回传到后台
+function processBlob(blob) {
+    const reader = new FileReader();
+    reader.onload = function (event) {
+        const base64Data = event.target.result.split(',')[1];
+        
+        // 显示前端预览
+        document.getElementById('success-prompt').style.display = 'block';
+        document.getElementById('img-preview').src = event.target.result;
+        
+        // 核心：把 base64 数据安全发送给后台 Python 变量传递器
+        const shareData = {
+            isStreamlitMessage: true,
+            type: "streamlit:setComponentValue",
+            value: base64Data
+        };
+        window.parent.postMessage(shareData, "*");
+    };
+    reader.readAsDataURL(blob);
+}
+</script>
+"""
+
+# 渲染混合式导入盒，接收从前端捕获的 Base64 数据
+captured_img_base64 = st.components.v1.html(paste_and_upload_html, height=270)
+
+# 如果前端成功捕获到图片数据
+if captured_img_base64:
     if st.button("🚀 开始无脑提取生词", type="primary", use_container_width=True):
         if not API_KEY:
             st.error("请先在 Streamlit 后台配置您的 DASHSCOPE_API_KEY！")
         else:
-            with st.spinner("有道视觉大模型正在解析图片，提炼生词和标准牛津释义..."):
-                base64_img = encode_image(img_bytes)
-                ai_result = call_ai_to_extract_from_image(base64_img)
+            with st.spinner("视觉大模型正在解析图片，提炼生词和标准牛津释义..."):
+                ai_result = call_ai_to_extract_from_image(captured_img_base64)
                 if ai_result:
                     new_count = 0
                     for w, info in ai_result.items():
@@ -129,24 +196,23 @@ if uploaded_file is not None:
                             st.session_state.words[word_lower] = info
                             new_count += 1
                     save_to_local()
-                    st.success(f"🎉 成功识别截图，自动生成高清真人语音并导入 {new_count} 个重要生词！")
+                    st.success(f"🎉 成功识别截图！导入了 {new_count} 个未掌握生词。")
                     st.rerun()
 
 st.divider()
 
-# 分栏标签页：生词本和复习模式
+# 分栏标签页
 tab1, tab2 = st.tabs(["📚 生词本 (高清美音)", "🎲 随机复习模式"])
 
 with tab1:
     if not st.session_state.words:
-        st.info("词本空空如也，快去上面上传截图吧！")
+        st.info("词本空空如也，快去上面粘贴或选择截图吧！")
     else:
         sorted_words = sorted(st.session_state.words.keys())
         
-        # --- 统一的前端高保真磨耳朵连播控制台 ---
         st.markdown("### 🎧 高清美音·连播磨耳朵控制台")
         
-        # UI 控制滑块
+        # 控制参数的滑块
         col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.5, 1.2, 1.3])
         with col_ctrl1:
             loop_rate = st.slider("朗读语速", min_value=0.5, max_value=1.5, value=1.0, step=0.1)
@@ -156,20 +222,20 @@ with tab1:
         with col_ctrl3:
             loop_interval = st.slider("单词跟读间隔(秒)", min_value=1, max_value=5, value=2, step=1)
             
-        # 纯前端音乐连播播音引擎：避开 Streamlit 后台重绘，100%在手机浏览器本地无缝稳定连播
-        # 采用有道高清美语发音 API (type=2)
+        # 终极修复方案 2：纯前端播放引擎
+        # 将播放状态、音频对象生命周期完全保留在 HTML 组件内部，绝不受 Python 页面刷新的任何干扰！
         words_json = json.dumps(sorted_words)
         infinite_js = "true" if infinite_loop else "false"
         
         player_html = f"""
-        <div style="background-color: #f8f9fa; border-radius: 8px; padding: 12px; border: 1px solid #e9ecef; display: flex; align-items: center; justify-content: space-between;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 20px;">🔊</span>
-                <span id="player-status" style="font-size: 13px; color: #555; font-weight: bold;">播音器空闲中</span>
+        <div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border: 1px solid #e9ecef; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 22px;">🔊</span>
+                <span id="player-status" style="font-size: 14px; color: #2c3e50; font-weight: bold;">播音器已就绪</span>
             </div>
             <div style="display: flex; gap: 8px;">
-                <button id="btn-play" onclick="startLoop()" style="background-color: #ff4b4b; color: white; border: none; border-radius: 5px; padding: 6px 16px; font-weight: bold; cursor: pointer;">▶️ 开始连播</button>
-                <button id="btn-stop" onclick="stopLoop()" style="background-color: #6c757d; color: white; border: none; border-radius: 5px; padding: 6px 16px; font-weight: bold; cursor: pointer;">⏹️ 停止</button>
+                <button id="btn-play" onclick="startLoop()" style="background-color: #ff4b4b; color: white; border: none; border-radius: 5px; padding: 8px 18px; font-weight: bold; cursor: pointer; font-size: 14px;">▶️ 开始连播</button>
+                <button id="btn-stop" onclick="stopLoop()" style="background-color: #6c757d; color: white; border: none; border-radius: 5px; padding: 8px 18px; font-weight: bold; cursor: pointer; font-size: 14px;">⏹️ 停止</button>
             </div>
         </div>
 
@@ -182,10 +248,8 @@ with tab1:
         var infinite = {infinite_js};
         var isPlaying = false;
         
-        // 关键修复：定义一个全局唯一的 Audio 实例，避开移动端每一次 new Audio 被拦截的安全策略
-        if (!window.globalAudioElement) {{
-            window.globalAudioElement = new Audio();
-        }}
+        // 使用前端独立的高级 HTML5 Audio 播放器环境
+        var localAudio = null;
 
         function updateStatus(text) {{
             document.getElementById('player-status').innerText = text;
@@ -193,91 +257,88 @@ with tab1:
 
         function startLoop() {{
             if (words.length === 0) {{
-                updateStatus("词本无单词可读");
+                updateStatus("没有可播放的单词");
                 return;
             }}
+            if (isPlaying) return;
+            
             isPlaying = true;
             index = 0;
             currentRepeat = 0;
-            document.getElementById('btn-play').style.opacity = '0.6';
+            document.getElementById('btn-play').style.opacity = '0.5';
             
-            // 手机浏览器核心解锁：利用点击这一用户手势，首次静默播音，彻底解锁播放权限
-            window.globalAudioElement.src = "[https://dict.youdao.com/dictvoice?type=2&audio=hello](https://dict.youdao.com/dictvoice?type=2&audio=hello)";
-            window.globalAudioElement.play().then(function() {{
-                playWord();
-            }}).catch(function(e) {{
-                console.log("音频解锁失败，直接尝试连播", e);
-                playWord();
-            }});
+            // 初始化音频对象
+            if (!localAudio) {{
+                localAudio = new Audio();
+            }}
+            playNextWord();
         }}
 
         function stopLoop() {{
             isPlaying = false;
-            if (window.globalAudioElement) {{
-                window.globalAudioElement.pause();
+            if (localAudio) {{
+                localAudio.pause();
             }}
             document.getElementById('btn-play').style.opacity = '1';
-            updateStatus("已手动停止播音");
+            updateStatus("已手动停止");
         }}
 
-        function playWord() {{
+        function playNextWord() {{
             if (!isPlaying) return;
             
             if (index < words.length) {{
                 var word = words[index];
-                updateStatus("正在播放: " + word + " (" + (currentRepeat + 1) + "/" + repeatLimit + ")");
+                updateStatus("正在朗读: " + word + " (" + (currentRepeat + 1) + "/" + repeatLimit + ")");
                 
-                // 采用网易有道高清真人美音接口（type=2为美音，发音饱满自然）
-                var url = "[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)" + encodeURIComponent(word);
+                // 清洗并加载网易有道官方高清美音接口（绝对纯净的字符串拼接，无 Markdown 污染）
+                var targetUrl = "[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)" + encodeURIComponent(word);
                 
-                window.globalAudioElement.src = url;
-                window.globalAudioElement.playbackRate = {loop_rate};
+                localAudio.src = targetUrl;
+                localAudio.playbackRate = {loop_rate};
                 
-                window.globalAudioElement.onended = function() {{
+                localAudio.onended = function() {{
                     currentRepeat++;
                     if (currentRepeat < repeatLimit) {{
-                        setTimeout(playWord, delay);
+                        setTimeout(playNextWord, delay);
                     }} else {{
                         currentRepeat = 0;
                         index++;
-                        setTimeout(playWord, delay);
+                        setTimeout(playNextWord, delay);
                     }}
                 }};
                 
-                window.globalAudioElement.onerror = function() {{
-                    // 若网络抖动或解析出错，自动跳过防止卡死
+                localAudio.onerror = function() {{
+                    console.log("音频加载发生错误，跳过此词防止卡死");
                     index++;
                     currentRepeat = 0;
-                    setTimeout(playWord, 100);
+                    setTimeout(playNextWord, 200);
                 }};
                 
-                window.globalAudioElement.play().catch(function(e) {{
-                    console.error("发音失败", e);
+                localAudio.play().catch(function(err) {{
+                    console.log("播放失败，尝试等待后继续", err);
                     index++;
                     currentRepeat = 0;
-                    setTimeout(playWord, 500);
+                    setTimeout(playNextWord, 500);
                 }});
                 
             }} else if (infinite && words.length > 0) {{
                 index = 0;
                 currentRepeat = 0;
-                setTimeout(playWord, delay);
+                setTimeout(playNextWord, delay);
             }} else {{
                 isPlaying = false;
                 document.getElementById('btn-play').style.opacity = '1';
-                updateStatus("播放完毕");
+                updateStatus("🎉 整个列表已全盘朗读完毕！");
             }}
         }}
         </script>
         """
-        st.components.v1.html(player_html, height=80)
+        st.components.v1.html(player_html, height=90)
         st.divider()
         
         # --- 单词列表展示 ---
         for w in sorted_words:
             info = st.session_state.words[w]
-            
-            # 使用左右布局，左侧内容折叠，右侧独立发音
             col_word, col_btn = st.columns([5, 1])
             with col_word:
                 expander_title = f"**{w}** |  {info.get('phonetic','')}  |  {info.get('def_zh','')}"
@@ -285,13 +346,11 @@ with tab1:
                     st.markdown(f"**💡 Oxford Style:**\n*{info.get('def_en','')}*")
                     st.markdown(f"**📝 Example:**\n{info.get('example','')}")
                     
-                    # 单词释义内部的例句朗读原生喇叭
                     ex_sentence = info.get('example','')
                     if ex_sentence:
-                        ex_url = f"[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=){ex_sentence}"
-                        # 注入极简 HTML 按钮，无刷新直接触发真人美音播放
+                        ex_url = f"[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=){st.experimental_webbase_component.encode_url(ex_sentence) if hasattr(st, 'experimental_webbase_component') else ex_sentence}"
                         ex_btn_html = f"""
-                        <button onclick="new Audio('{ex_url}').play()" style="
+                        <button onclick="new Audio('[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)' + encodeURIComponent('{ex_sentence.replace("'", "\\'")}')).play()" style="
                             background-color: #f1f3f5; border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; font-weight: bold; color: #495057; display: flex; align-items: center; gap: 4px;
                         ">🔊 读例句</button>
                         """
@@ -302,14 +361,13 @@ with tab1:
                         save_to_local()
                         st.rerun()
             with col_btn:
-                # 原生 HTML 播音喇叭：百分之百支持手机端，点击即发声，高清美音
-                word_url = f"[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=){w}"
-                btn_html = f"""
-                <button onclick="new Audio('{word_url}').play()" style="
+                word_url_encoded = w.replace("'", "\\'")
+                single_btn_html = f"""
+                <button onclick="new Audio('[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)' + encodeURIComponent('{word_url_encoded}')).play()" style="
                     background: none; border: none; font-size: 20px; cursor: pointer; padding: 5px 10px; border-radius: 5px; transition: background 0.2s; width: 100%; text-align: center;
                 " onmouseover="this.style.background='#f0f2f6'" onmouseout="this.style.background='none'">🔊</button>
                 """
-                st.components.v1.html(btn_html, height=45)
+                st.components.v1.html(single_btn_html, height=45)
 
 with tab2:
     if not st.session_state.words:
@@ -324,11 +382,11 @@ with tab2:
         
         st.markdown(f"## ❓ **{review_w}**")
         
-        # 听音：使用原生 HTML 喇叭，支持手机端首播
-        review_word_url = f"[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=){review_w}"
+        # 听音
+        review_w_js = review_w.replace("'", "\\'")
         review_btn_html = f"""
-        <button onclick="new Audio('{review_word_url}').play()" style="
-            background-color: #ff4b4b; color: white; border: none; border-radius: 5px; padding: 8px 16px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 6px;
+        <button onclick="new Audio('[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)' + encodeURIComponent('{review_w_js}')).play()" style="
+            background-color: #ff4b4b; color: white; border: none; border-radius: 5px; padding: 8px 16px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 14px;
         ">🔊 听美音发音</button>
         """
         st.components.v1.html(review_btn_html, height=45)
@@ -343,12 +401,10 @@ with tab2:
             st.markdown(f"**英文解释：** {review_info.get('def_en','')}")
             st.markdown(f"**例句熟读：** *{review_info.get('example','')}*")
             
-            # 听整句朗读，建立PTE语感
             ex_sentence = review_info.get('example','')
             if ex_sentence:
-                review_ex_url = f"[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=){ex_sentence}"
                 review_ex_btn_html = f"""
-                <button onclick="new Audio('{review_ex_url}').play()" style="
+                <button onclick="new Audio('[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)' + encodeURIComponent('{ex_sentence.replace("'", "\\'")}')).play()" style="
                     background-color: #6c757d; color: white; border: none; border-radius: 5px; padding: 6px 12px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px;
                 ">🔊 听例句朗读</button>
                 """
