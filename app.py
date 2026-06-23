@@ -3,6 +3,7 @@ import json
 import os
 import random
 import base64
+import re
 from openai import OpenAI
 
 # 页面基础配置（自适应移动端与PC端）
@@ -17,6 +18,13 @@ MODEL_NAME = "qwen-vl-max"  # 阿里顶级视觉多模态大模型
 def encode_image(image_bytes):
     """将图片字节流转换为 base64 编码，用于传给视觉大模型"""
     return base64.b64encode(image_bytes).decode('utf-8')
+
+def extract_json_from_text(text):
+    """使用正则表达式强力提取纯净的 JSON 块，防止大模型附加废话导致解析崩溃"""
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        return match.group(0)
+    return text
 
 def call_ai_to_extract_from_image(base64_image):
     """调用千问视觉大模型：识别图片文本，智能过滤熟词，生成标准牛津释义 JSON"""
@@ -33,7 +41,7 @@ def call_ai_to_extract_from_image(base64_image):
     3. 中文释义 (简明扼要的中文翻译)
     4. 经典例句 (一句话，最好契合PTE或学术场景)
     
-    必须且只能返回标准的 JSON 格式数据，不要包含任何 Markdown 标记（如 ```json），不要包含任何解释性文字。格式示例如下：
+    必须且只能返回标准的 JSON 格式数据，不要包含任何 Markdown 标记，不要包含任何解释性文字。格式示例如下：
     {
         "word1": {
             "phonetic": "/.../",
@@ -65,14 +73,8 @@ def call_ai_to_extract_from_image(base64_image):
         )
         
         result_text = response.choices[0].message.content.strip()
-        
-        # 兼容处理大模型可能附带的 Markdown 标记
-        if result_text.startswith("```json"):
-            result_text = result_text[7:]
-        if result_text.endswith("```"):
-            result_text = result_text[:-3]
-            
-        return json.loads(result_text.strip())
+        clean_json_str = extract_json_from_text(result_text)
+        return json.loads(clean_json_str)
     except Exception as e:
         st.error(f"AI 图像识别出错啦: {e}")
         return None
@@ -82,6 +84,7 @@ def call_ai_to_extract_from_text(raw_text):
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
     prompt = f"""
     分析以下PTE文本或评分结果，找出较难、较生僻或重要的学术词汇，并按牛津双解标准输出JSON。
+    必须且只能返回标准的 JSON 数据块，绝不附加任何其他诸如“好的”、“希望对你有帮助”的解释性文本！
     待分析文本：
     {raw_text}
     """
@@ -92,11 +95,8 @@ def call_ai_to_extract_from_text(raw_text):
             temperature=0.1
         )
         result_text = response.choices[0].message.content.strip()
-        if result_text.startswith("```json"):
-            result_text = result_text[7:]
-        if result_text.endswith("```"):
-            result_text = result_text[:-3]
-        return json.loads(result_text.strip())
+        clean_json_str = extract_json_from_text(result_text)
+        return json.loads(clean_json_str)
     except Exception as e:
         st.error(f"AI 文本解析出错啦: {e}")
         return None
@@ -125,13 +125,13 @@ st.markdown("### 📸 猩际截图智能导入")
 # 引导卡片：说明电脑端和手机端的最佳传输姿势
 st.info("""
 💡 **如何高效导入生词**：
-- **💻 电脑端最快**：**点击下方虚线上传框**，让它处于高亮选中状态，然后直接按键盘 **`Ctrl+V` (或 `Cmd+V`)** 粘贴截图！无需保存图片！
-- **🗂️ 拖拽导入**：截图后也可以直接把图片拖拽进去。
-- **📱 手机端**：点击下方上传框，直接从相册中选择最新截图。
+- **电脑端极速粘贴**：点击下方带有 **「Upload」** 字样的灰色区域，让其处于激活状态，然后直接按键盘 `Ctrl+V` (或 `Cmd+V`) 粘贴截图！无需保存图片！
+- **拖拽导入**：截图后也可以直接把图片拖拽进去。
+- **手机端**：点击下方上传框，直接从相册中选择最新截图。
 """)
 
 uploaded_file = st.file_uploader(
-    "👉 点击此框后，直接按键盘 Ctrl+V 粘贴你的截图！", 
+    "👉 请在此处拖入或粘贴你的猩际截图（或点击选择文件）", 
     type=["png", "jpg", "jpeg"]
 )
 
@@ -195,7 +195,7 @@ with tab1:
         # --- 统一的前端高保真磨耳朵连播控制台 ---
         st.markdown("### 🎧 高清美音·连播磨耳朵控制台")
         
-        # UI 控制滑块
+        # UI 控制滑块 (时间间隔现在支持 0秒极速连播)
         col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.5, 1.2, 1.3])
         with col_ctrl1:
             loop_rate = st.slider("朗读语速", min_value=0.5, max_value=1.5, value=1.0, step=0.1)
@@ -203,7 +203,7 @@ with tab1:
         with col_ctrl2:
             repeat_count = st.slider("每个单词复读次数", min_value=1, max_value=5, value=3, step=1)
         with col_ctrl3:
-            loop_interval = st.slider("单词跟读间隔(秒)", min_value=1, max_value=5, value=2, step=1)
+            loop_interval = st.slider("单词跟读间隔(秒)", min_value=0.0, max_value=5.0, value=1.0, step=0.5)
             
         # 纯前端音乐连播播音引擎：避开 Streamlit 后台重绘，100%在手机浏览器本地无缝稳定连播
         # 采用有道高清美语发音 API (type=2)
@@ -332,7 +332,7 @@ with tab1:
                     ex_sentence = info.get('example','')
                     if ex_sentence:
                         ex_btn_html = f"""
-                        <button onclick="new Audio('https://dict.youdao.com/dictvoice?type=2&audio=' + encodeURIComponent('{ex_sentence.replace("'", "\\'")}').replace(/\"/g, '&quot;')).play()" style="
+                        <button onclick="new Audio('https://dict.youdao.com/dictvoice?type=2&audio=' + encodeURIComponent('{ex_sentence.replace("'", "\\'")}').replace(/"/g, '&quot;')).play()" style="
                             background-color: #f1f3f5; border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; font-weight: bold; color: #495057; display: flex; align-items: center; gap: 4px;
                         ">🔊 读例句</button>
                         """
@@ -386,7 +386,7 @@ with tab2:
             ex_sentence = review_info.get('example','')
             if ex_sentence:
                 review_ex_btn_html = f"""
-                <button onclick="new Audio('https://dict.youdao.com/dictvoice?type=2&audio=' + encodeURIComponent('{ex_sentence.replace("'", "\\'")}').replace(/\"/g, '&quot;')).play()" style="
+                <button onclick="new Audio('https://dict.youdao.com/dictvoice?type=2&audio=' + encodeURIComponent('{ex_sentence.replace("'", "\\'")}').replace(/"/g, '&quot;')).play()" style="
                     background-color: #6c757d; color: white; border: none; border-radius: 5px; padding: 6px 12px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px;
                 ">🔊 听例句朗读</button>
                 """
