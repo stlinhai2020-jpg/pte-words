@@ -125,12 +125,13 @@ st.markdown("### 📸 猩际截图智能导入")
 # 引导卡片：说明电脑端和手机端的最佳传输姿势
 st.info("""
 💡 **如何高效导入生词**：
-- **电脑端**：使用任何截图工具截图后，**直接把截图拖拽**到下方框中，无需保存，松手即可！
-- **手机端**：点击下方上传框，直接从相册中选择最新的 APEUni 截图。
+- **💻 电脑端最快**：**点击下方虚线上传框**，让它处于高亮选中状态，然后直接按键盘 **`Ctrl+V` (或 `Cmd+V`)** 粘贴截图！无需保存图片！
+- **🗂️ 拖拽导入**：截图后也可以直接把图片拖拽进去。
+- **📱 手机端**：点击下方上传框，直接从相册中选择最新截图。
 """)
 
 uploaded_file = st.file_uploader(
-    "👉 请在此处拖入你的猩际截图（或点击选择文件）", 
+    "👉 点击此框后，直接按键盘 Ctrl+V 粘贴你的截图！", 
     type=["png", "jpg", "jpeg"]
 )
 
@@ -265,15 +266,15 @@ with tab1:
             updateStatus("已手动停止");
         }}
 
-        function playNextWord() {{
+        function playNextWord() {
             if (!isPlaying) return;
             
-            if (index < words.length) {{
+            if (index < words.length) {
                 var word = words[index];
                 updateStatus("正在朗读: " + word + " (" + (currentRepeat + 1) + "/" + repeatLimit + ")");
                 
                 // 采用网易有道官方高清美音接口（绝对纯净的字符串拼接，无 Markdown 污染）
-                var targetUrl = "[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)" + encodeURIComponent(word);
+                var targetUrl = "https://dict.youdao.com/dictvoice?type=2&audio=" + encodeURIComponent(word);
                 
                 localAudio.src = targetUrl;
                 localAudio.playbackRate = {loop_rate};
@@ -331,7 +332,7 @@ with tab1:
                     ex_sentence = info.get('example','')
                     if ex_sentence:
                         ex_btn_html = f"""
-                        <button onclick="new Audio('[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)' + encodeURIComponent('{ex_sentence.replace("'", "\\'")}').replace(/"/g, '&quot;')).play()" style="
+                        <button onclick="new Audio('https://dict.youdao.com/dictvoice?type=2&audio=' + encodeURIComponent('{ex_sentence.replace("'", "\\'")}').replace(/\"/g, '&quot;')).play()" style="
                             background-color: #f1f3f5; border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; font-weight: bold; color: #495057; display: flex; align-items: center; gap: 4px;
                         ">🔊 读例句</button>
                         """
@@ -344,7 +345,7 @@ with tab1:
             with col_btn:
                 word_url_encoded = w.replace("'", "\\'").replace('"', '&quot;')
                 single_btn_html = f"""
-                <button onclick="new Audio('[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)' + encodeURIComponent('{word_url_encoded}')).play()" style="
+                <button onclick="new Audio('https://dict.youdao.com/dictvoice?type=2&audio=' + encodeURIComponent('{word_url_encoded}')).play()" style="
                     background: none; border: none; font-size: 20px; cursor: pointer; padding: 5px 10px; border-radius: 5px; transition: background 0.2s; width: 100%; text-align: center;
                 " onmouseover="this.style.background='#f0f2f6'" onmouseout="this.style.background='none'">🔊</button>
                 """
@@ -366,7 +367,7 @@ with tab2:
         # 听音
         review_w_js = review_w.replace("'", "\\'").replace('"', '&quot;')
         review_btn_html = f"""
-        <button onclick="new Audio('[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)' + encodeURIComponent('{review_w_js}')).play()" style="
+        <button onclick="new Audio('https://dict.youdao.com/dictvoice?type=2&audio=' + encodeURIComponent('{review_w_js}')).play()" style="
             background-color: #ff4b4b; color: white; border: none; border-radius: 5px; padding: 8px 16px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 14px;
         ">🔊 听美音发音</button>
         """
@@ -385,7 +386,7 @@ with tab2:
             ex_sentence = review_info.get('example','')
             if ex_sentence:
                 review_ex_btn_html = f"""
-                <button onclick="new Audio('[https://dict.youdao.com/dictvoice?type=2&audio=](https://dict.youdao.com/dictvoice?type=2&audio=)' + encodeURIComponent('{ex_sentence.replace("'", "\\'")}').replace(/"/g, '&quot;')).play()" style="
+                <button onclick="new Audio('https://dict.youdao.com/dictvoice?type=2&audio=' + encodeURIComponent('{ex_sentence.replace("'", "\\'")}').replace(/\"/g, '&quot;')).play()" style="
                     background-color: #6c757d; color: white; border: none; border-radius: 5px; padding: 6px 12px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px;
                 ">🔊 听例句朗读</button>
                 """
