@@ -266,10 +266,10 @@ with tab1:
             updateStatus("已手动停止");
         }}
 
-        function playNextWord() {
+        function playNextWord() {{
             if (!isPlaying) return;
             
-            if (index < words.length) {
+            if (index < words.length) {{
                 var word = words[index];
                 updateStatus("正在朗读: " + word + " (" + (currentRepeat + 1) + "/" + repeatLimit + ")");
                 
