@@ -11,7 +11,7 @@ st.set_page_config(page_title="PTE极简生词本", layout="centered", initial_s
 # --- 1. 配置阿里通义千问视觉大模型 ---
 # 提示：请去阿里云百炼平台申请 DASHSCOPE_API_KEY 并填入 Streamlit 的 Secrets 中
 API_KEY = st.secrets.get("DASHSCOPE_API_KEY", "sk-ws-H.RPXDEER.ZfBh.MEUCIBgga-s1bmH7zVO5l1wX6DjUMgcSsCnfJAohmy0mpxT8AiEAtdVHUInYzuBaDW99BtGX0bnhnEKampjR1VgY4YS3Ofg") 
-BASE_URL = "[https://dashscope.aliyuncs.com/compatible-mode/v1](https://dashscope.aliyuncs.com/compatible-mode/v1)"
+BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL_NAME = "qwen-vl-max"  # 阿里顶级视觉多模态大模型
 
 def encode_image(image_bytes):
@@ -110,9 +110,10 @@ def js_speak(text, rate=1.0):
     """
     st.components.v1.html(js_code, height=0, width=0)
 
-def js_loop_speak(words_list, rate=1.0, delay=3500):
-    """注入 JavaScript 循环连续朗读整个生词本的单词"""
+def js_loop_speak(words_list, rate=1.0, repeat_count=3, delay=1500, infinite=False):
+    """注入 JavaScript 循环连续朗读整个生词本的单词，支持自定义复读次数和无限循环播放"""
     words_json = json.dumps(words_list)
+    infinite_js = "true" if infinite else "false"
     js_code = f"""
     <script>
     (function() {{
@@ -120,18 +121,39 @@ def js_loop_speak(words_list, rate=1.0, delay=3500):
             window.speechSynthesis.cancel();
             var words = {words_json};
             var index = 0;
+            var currentRepeat = 0;
+            var repeatLimit = {repeat_count};
             var rate = {rate};
             var delay = {delay};
+            var infinite = {infinite_js};
             
             window.isLoopPlaying = true;
             
             function playNext() {{
-                if (index < words.length && window.isLoopPlaying) {{
+                if (!window.isLoopPlaying) return;
+                
+                if (index < words.length) {{
                     var msg = new SpeechSynthesisUtterance(words[index]);
                     msg.lang = 'en-US';
                     msg.rate = rate;
+                    
+                    msg.onend = function() {{
+                        currentRepeat++;
+                        if (currentRepeat < repeatLimit) {{
+                            // 同一个单词继续复读，中间留有间隔
+                            setTimeout(playNext, delay);
+                        }} else {{
+                            // 该单词已读满指定次数，切换到下一个单词
+                            currentRepeat = 0;
+                            index++;
+                            setTimeout(playNext, delay);
+                        }}
+                    }};
                     window.speechSynthesis.speak(msg);
-                    index++;
+                }} else if (infinite && words.length > 0) {{
+                    // 列表播放完毕，且开启了无限循环，重头开始
+                    index = 0;
+                    currentRepeat = 0;
                     setTimeout(playNext, delay);
                 }} else {{
                     window.isLoopPlaying = false;
@@ -162,8 +184,18 @@ st.caption("截图直接 Ctrl+V 粘贴 | 纯正美音纠音 | 列表循环朗读
 
 # 截图导入区
 st.markdown("### 📸 猩际截图无脑导入")
+
+# 🚨 针对点击会自动打开文件管理器问题的“防呆/引导”卡片
+st.info("""
+💡 **极速粘贴小诀窍（无需保存到本地）**：
+1. 在猩际或任何界面截图后（此时图片已在剪贴板中）。
+2. **千万不要点击下方上传框**（点击会强制打开系统本地文件夹）。
+3. **只需在当前网页的任意空白处点一下**（让浏览器获得焦点）。
+4. 直接按下键盘的 **Ctrl + V** (Mac上为 **Cmd + V**)，截图就会瞬间显示在下方！
+""")
+
 uploaded_file = st.file_uploader(
-    "💡 鼠标点一下这里，然后直接按 Ctrl+V 粘贴截图（或拖拽/选择文件）", 
+    "👉 选中网页后直接按 Ctrl+V 粘贴（或在此处拖入图片）", 
     type=["png", "jpg", "jpeg"]
 )
 
@@ -202,18 +234,26 @@ with tab1:
         
         # --- 磨耳朵连播控制台 ---
         st.markdown("### 🎧 磨耳朵连播控制台")
-        col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.5, 1, 1.5])
+        col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.5, 1.2, 1.3])
         with col_ctrl1:
-            loop_rate = st.slider("朗读语速", min_value=0.6, max_value=1.5, value=1.0, step=0.1)
+            loop_rate = st.slider("朗读语速", min_value=0.5, max_value=1.5, value=1.0, step=0.1)
+            infinite_loop = st.checkbox("🔄 无限循环播放列表", value=False)
         with col_ctrl2:
-            loop_interval = st.slider("单词间隔(秒)", min_value=2, max_value=6, value=3, step=1)
-        
+            repeat_count = st.slider("每个单词复读次数", min_value=1, max_value=5, value=3, step=1)
         with col_ctrl3:
+            loop_interval = st.slider("词内/词间间隔(秒)", min_value=1, max_value=5, value=2, step=1)
+            
             st.write("")  # 垂直对齐调整
             sub_col1, sub_col2 = st.columns(2)
             with sub_col1:
                 if st.button("▶️ 连播", type="primary", key="btn_loop_play"):
-                    js_loop_speak(sorted_words, rate=loop_rate, delay=loop_interval * 1000)
+                    js_loop_speak(
+                        sorted_words, 
+                        rate=loop_rate, 
+                        repeat_count=repeat_count, 
+                        delay=loop_interval * 1000,
+                        infinite=infinite_loop
+                    )
             with sub_col2:
                 if st.button("⏹️ 停止", key="btn_loop_stop"):
                     js_stop_speak()
