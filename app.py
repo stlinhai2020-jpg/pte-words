@@ -8,15 +8,14 @@ from openai import OpenAI
 # 页面基础配置
 st.set_page_config(page_title="PTE极简生词本", layout="centered", initial_sidebar_state="collapsed")
 
-# --- 1. 切换为通义千问视觉大模型配置 ---
-# 提示：请去阿里云百炼平台申请一个免费的 DASHSCOPE_API_KEY
+# --- 1. 配置视觉大模型 ---
 API_KEY = st.secrets.get("DASHSCOPE_API_KEY", "sk-ws-H.RPXDEER.ZfBh.MEUCIBgga-s1bmH7zVO5l1wX6DjUMgcSsCnfJAohmy0mpxT8AiEAtdVHUInYzuBaDW99BtGX0bnhnEKampjR1VgY4YS3Ofg") 
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-MODEL_NAME = "qwen-vl-max"  # 真正的顶级视觉大模型
+MODEL_NAME = "qwen-vl-max"
 
-def encode_image(uploaded_file):
-    """将上传的图片文件转换为 base64 编码"""
-    return base64.b64encode(uploaded_file.read()).decode('utf-8')
+def encode_image(image_bytes):
+    """将图片字节流转换为 base64 编码"""
+    return base64.b64encode(image_bytes).decode('utf-8')
 
 def call_ai_to_extract_from_image(base64_image):
     """调用通义千问视觉接口：看图、识字、过滤熟词、返回牛津格式 JSON"""
@@ -63,7 +62,6 @@ def call_ai_to_extract_from_image(base64_image):
             ],
             temperature=0.1
         )
-        # 清理可能存在的特殊外层字符
         result_text = response.choices[0].message.content.strip()
         if result_text.startswith("```json"):
             result_text = result_text[7:]
@@ -89,20 +87,27 @@ def save_to_local():
 
 # --- 3. 界面交互 ---
 st.title("⚡ PTE 极简生词本")
-st.caption("免登录 | 本地存储 | 截图无脑识别版")
+st.caption("免登录 | 本地存储 | 截图无脑粘贴版")
 
 st.markdown("### 📸 猩际截图无脑导入")
-uploaded_file = st.file_uploader("点击拍照、从相册选择截图、或直接拖入截图：", type=["png", "jpg", "jpeg"])
+
+# 利用 Streamlit 的 paste 兼容性：拖拽、点击、或者直接聚焦到这里按 Ctrl+V 粘贴均可触发
+uploaded_file = st.file_uploader(
+    "💡 鼠标点一下这里，然后直接按 Ctrl+V 粘贴截图（或拖拽/选择文件）", 
+    type=["png", "jpg", "jpeg"]
+)
 
 if uploaded_file is not None:
-    st.image(uploaded_file, caption='已上传的 PTE 截图', use_container_width=True)
+    # 读取图片字节流
+    img_bytes = uploaded_file.read()
+    st.image(img_bytes, caption='已捕获的 PTE 截图', use_container_width=True)
     
     if st.button("🚀 开始无脑提取生词", type="primary"):
         if not API_KEY:
             st.error("请先在 Streamlit 后台配置您的 DASHSCOPE_API_KEY！")
         else:
             with st.spinner("千问大模型正在努力阅读图片、过滤熟词并查询牛津释义..."):
-                base64_img = encode_image(uploaded_file)
+                base64_img = encode_image(img_bytes)
                 ai_result = call_ai_to_extract_from_image(base64_img)
                 if ai_result:
                     new_count = 0
@@ -117,11 +122,12 @@ if uploaded_file is not None:
 
 st.divider()
 
+# 词本与复习模块（保持原样）
 tab1, tab2 = st.tabs(["📚 生词本 (字母排序)", "🎲 随机复习模式"])
 
 with tab1:
     if not st.session_state.words:
-        st.info("词本空空如也，快去上面上传截图吧！")
+        st.info("词本空空如也，快去上面粘贴截图吧！")
     else:
         sorted_words = sorted(st.session_state.words.keys())
         for w in sorted_words:
