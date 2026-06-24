@@ -60,8 +60,10 @@ def call_ai_to_extract_from_text(raw_text):
         return None
 
 # --- 2. 云端数据库 (Supabase) 模块 ---
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", "")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "")
+raw_url = st.secrets.get("SUPABASE_URL", "").strip()
+# 强力清洗 URL，防止用户误粘贴带有 /rest/v1 路径或结尾斜杠导致 PGRST125 Invalid path 报错
+SUPABASE_URL = raw_url.split("/rest/v1")[0].rstrip("/") if raw_url else ""
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "").strip()
 
 @st.cache_resource
 def init_supabase():
