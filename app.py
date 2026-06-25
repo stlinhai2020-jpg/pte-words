@@ -3,21 +3,14 @@ import json
 import os
 import random
 import base64
-import re
-import time
+import urllib.parse
 from openai import OpenAI
 
 # 页面基础配置（自适应移动端与PC端）
 st.set_page_config(page_title="PTE极简生词本", layout="centered", initial_sidebar_state="collapsed")
 
-# 初始化 session_state
-if "words" not in st.session_state:
-    st.session_state.words = {}
-if "play_audio" not in st.session_state:
-    st.session_state.play_audio = None
-
 # --- 1. 配置阿里通义千问模型 ---
-API_KEY = st.secrets.get("DASHSCOPE_API_KEY", "sk-ws-H.RPXDEER.ZfBh.MEUCIBgga-s1bmH7zVO5l1wX6DjUMgcSsCnfJAohmy0mpxT8AiEAtdVHUInYzuBaDW99BtGX0bnhnEKampjR1VgY4YS3Ofg") 
+API_KEY = st.secrets.get("DASHSCOPE_API_KEY", "") 
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL_NAME = "qwen-vl-max" 
 
@@ -25,17 +18,18 @@ def encode_image(image_bytes):
     return base64.b64encode(image_bytes).decode('utf-8')
 
 def extract_json_from_text(text):
-    """提取纯净JSON，防止大模型废话导致报错"""
-    match = re.search(r'\{[\s\S]*\}', text)
-    if match:
-        return match.group(0)
+    """提取纯净JSON，强制从第一个 { 截取到最后一个 }，防止大模型废话或多段格式导致解析崩溃"""
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        return text[start:end+1]
     return text
 
 def call_ai_to_extract_from_image(base64_image):
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
     prompt = """
     你是一个资深的PTE备考专家。请识别截图中的学术词汇（过滤简单词），按牛津词典风格提供：音标、英文释义、中文释义、一句话经典例句。
-    必须且只能返回标准的 JSON 数据块，绝不能包含任何 Markdown 标记和多余废话。
+    【重要警告】：所有的单词必须全部存放在【同一个】JSON字典中返回。绝对不允许返回多个独立的JSON块！绝不能包含多余废话。
     """
     try:
         response = client.chat.completions.create(
@@ -52,7 +46,7 @@ def call_ai_to_extract_from_text(raw_text):
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
     prompt = f"""
     分析以下PTE文本，找出较难的学术词汇，并按牛津双解标准输出JSON。
-    必须且只能返回标准的 JSON 数据块，绝不附加任何其他诸如“好的”的解释性文本！
+    【重要警告】：所有的单词必须全部存放在【同一个】JSON字典中返回。绝对不允许返回多个独立的JSON块！绝不能包含多余废话。
     待分析文本：\n{raw_text}
     """
     try:
@@ -68,7 +62,6 @@ def call_ai_to_extract_from_text(raw_text):
 
 # --- 2. 云端数据库 (Supabase) 模块 ---
 raw_url = st.secrets.get("SUPABASE_URL", "").strip()
-# 强力清洗 URL，防止用户误粘贴带有 /rest/v1 路径或结尾斜杠导致 PGRST125 Invalid path 报错
 SUPABASE_URL = raw_url.split("/rest/v1")[0].rstrip("/") if raw_url else ""
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "").strip()
 
@@ -85,7 +78,8 @@ def init_supabase():
 supabase = init_supabase()
 
 # 加载数据（一次性载入，绝不在循环中重复请求，保障极速）
-if not st.session_state.words:
+if "words" not in st.session_state:
+    st.session_state.words = {}
     is_cloud_synced = False
     if supabase:
         try:
@@ -138,19 +132,20 @@ def delete_word_from_db(word):
 
 # --- 3. 页面交互 UI 逻辑 ---
 st.title("⚡ PTE 智能生词本")
-st.caption("截图/文本导入 | 有道真人美音 | 云端同步不丢失")
+st.caption("无缝播放不卡顿 | 有道真人美音 | 云端同步不丢失")
 
 st.markdown("### 📥 生词智能导入")
 
-# 更加显眼的聚焦粘贴区域说明
-st.markdown("""
-<div style="background-color: #fff3cd; color: #856404; padding: 12px; border-radius: 6px; border: 1px solid #ffeeba; margin-bottom: 15px; font-size: 14px;">
-    🔑 <b>截图如何100%成功粘贴？</b><br/>
-    先点击下方上传框任意空白区域（让它获得浏览器焦点），然后直接按下键盘 <b>Ctrl + V</b>，即可完美自动捕获你刚刚截好的图片！
-</div>
-""", unsafe_allow_html=True)
+# 终极保姆级粘贴指南
+st.info("""
+💡 **【必看】如何100%成功粘贴截图？**
+由于浏览器安全限制，请**务必**按照以下步骤操作：
+1. 鼠标点击下方「Upload」按钮 **👉右侧的灰色空白区域👈**（不要点白色按钮本身！）。
+2. 此时整个灰色虚线框的**边框会变色/高亮**（说明焦点已锁定）。
+3. 直接按下键盘 `Ctrl + V` (或 `Cmd + V`)，图片就会瞬间出现！
+""")
 
-uploaded_file = st.file_uploader("👉 粘贴截图、拖拽图片或点击选择", type=["png", "jpg", "jpeg"])
+uploaded_file = st.file_uploader("👉 锁定焦点后，按 Ctrl+V 粘贴（或拖入图片）", type=["png", "jpg", "jpeg"])
 
 with st.expander("✍️ 无法截图？点击这里直接粘贴PTE评分或华尔街日报原文"):
     pasted_text = st.text_area("把大段文本贴在这里：", placeholder="Today, we are going to discuss subsequently allocated resources...")
@@ -191,7 +186,7 @@ elif pasted_text.strip():
 st.divider()
 
 # 分栏标签页
-tab1, tab2 = st.tabs(["📚 生词本 (高清美音)", "🎲 随机复习模式"])
+tab1, tab2 = st.tabs(["📚 生词本 (极速无卡顿版)", "🎲 随机复习模式"])
 
 with tab1:
     if not st.session_state.words:
@@ -199,7 +194,7 @@ with tab1:
     else:
         sorted_words = sorted(st.session_state.words.keys())
         
-        # 3.1 连播磨耳朵控制台 (单iframe，0卡顿)
+        # 3.1 连播磨耳朵控制台
         st.markdown("### 🎧 高清美音·连播磨耳朵控制台")
         col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.5, 1.2, 1.3])
         with col_ctrl1:
@@ -276,29 +271,25 @@ with tab1:
         st.components.v1.html(player_html, height=90)
         st.divider()
         
-        # 3.2 单词本列表（纯原生渲染，零iframe，速度提升100倍！）
+        # 3.2 单词本列表（使用原生 st.audio，0卡顿不刷新界面）
         for w in sorted_words:
             info = st.session_state.words[w]
-            col_word, col_play, col_del = st.columns([5, 0.8, 0.8])
+            col_word, col_del = st.columns([5, 1])
             
             with col_word:
                 expander_title = f"**{w}** |  {info.get('phonetic','')}  |  {info.get('def_zh','')}"
                 with st.expander(expander_title):
+                    # 使用原生播放器：点开就能发声，绝不导致网页重新加载
+                    audio_url = f"https://dict.youdao.com/dictvoice?type=2&audio={urllib.parse.quote(w)}"
+                    st.audio(audio_url, format="audio/mpeg")
+                    
                     st.markdown(f"**💡 Oxford Style:**\n*{info.get('def_en','')}*")
                     st.markdown(f"**📝 Example:**\n{info.get('example','')}")
                     
                     ex_sentence = info.get('example','')
                     if ex_sentence:
-                        # 触发全局隐藏播放器播放例句
-                        if st.button("🗣️ 读例句", key=f"ex_btn_{w}"):
-                            st.session_state.play_audio = f"https://dict.youdao.com/dictvoice?type=2&audio={ex_sentence}"
-                            st.rerun()
-            
-            with col_play:
-                # 触发全局隐藏播放器发音
-                if st.button("🔊", key=f"play_btn_{w}"):
-                    st.session_state.play_audio = f"https://dict.youdao.com/dictvoice?type=2&audio={w}"
-                    st.rerun()
+                        ex_audio_url = f"https://dict.youdao.com/dictvoice?type=2&audio={urllib.parse.quote(ex_sentence)}"
+                        st.audio(ex_audio_url, format="audio/mpeg")
             
             with col_del:
                 if st.button("🗑️", key=f"del_btn_{w}"):
@@ -317,9 +308,9 @@ with tab2:
         review_info = st.session_state.words[review_w]
         st.markdown(f"## ❓ **{review_w}**")
         
-        if st.button("🔊 听美音发音", key="review_play_btn"):
-            st.session_state.play_audio = f"https://dict.youdao.com/dictvoice?type=2&audio={review_w}"
-            st.rerun()
+        # 同样使用原生播放器
+        review_audio_url = f"https://dict.youdao.com/dictvoice?type=2&audio={urllib.parse.quote(review_w)}"
+        st.audio(review_audio_url, format="audio/mpeg")
             
         if not st.session_state.show_answer:
             if st.button("👀 查看释义与例句", type="primary"):
@@ -333,9 +324,8 @@ with tab2:
             
             ex_sentence = review_info.get('example','')
             if ex_sentence:
-                if st.button("🔊 听例句朗读", key="review_ex_play_btn"):
-                    st.session_state.play_audio = f"https://dict.youdao.com/dictvoice?type=2&audio={ex_sentence}"
-                    st.rerun()
+                ex_audio_url = f"https://dict.youdao.com/dictvoice?type=2&audio={urllib.parse.quote(ex_sentence)}"
+                st.audio(ex_audio_url, format="audio/mpeg")
                 
             st.write("")
             col1, col2 = st.columns(2)
@@ -349,18 +339,3 @@ with tab2:
                     st.session_state.current_review_word = random.choice(list(st.session_state.words.keys()))
                     st.session_state.show_answer = False
                     st.rerun()
-
-# --- 4. 极致顺滑的【全局单点播放引擎】 ---
-if st.session_state.play_audio:
-    # 渲染唯一的隐藏 iframe 进行声音播放，触发后立刻自我销毁
-    st.components.v1.html(
-        f"""
-        <audio autoplay>
-            <source src="{st.session_state.play_audio}" type="audio/mpeg">
-        </audio>
-        """,
-        height=0,
-        key=f"global_player_{time.time()}"
-    )
-    # 及时重置播放状态，防止下一次不相关的页面重塑引发重音
-    st.session_state.play_audio = None
